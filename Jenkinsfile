@@ -6,8 +6,8 @@ pipeline {
         }
     }
     parameters {
-        string(name: 'BASE_URL', defaultValue: 'http://host.docker.internal:8000', description: 'Application URL')
-        string(name: 'SMOKEMONITOR_URL', defaultValue: 'http://host.docker.internal:8080', description: 'SmokeMonitor URL')
+        string(name: 'BASE_URL', defaultValue: 'https://smokemonitor-app.graytree-810a6fb6.northeurope.azurecontainerapps.io', description: 'Application URL')
+        string(name: 'SMOKEMONITOR_URL', defaultValue: 'https://smokemonitor-monitor.graytree-810a6fb6.northeurope.azurecontainerapps.io', description: 'SmokeMonitor URL')
     }
     stages {
         stage('Install test dependencies') {

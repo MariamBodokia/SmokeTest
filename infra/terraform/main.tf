@@ -152,11 +152,17 @@ resource "azurerm_linux_virtual_machine" "jenkins" {
               - "50000:50000"
             volumes:
               - /opt/jenkins_home:/var/jenkins_home
+              - /var/run/docker.sock:/var/run/docker.sock
             environment:
               JAVA_OPTS: "-Djenkins.install.runSetupWizard=true -Dhudson.security.csrf.GlobalCrumbIssuerConfiguration.DISABLE_CSRF_PROTECTION=true"
         EOF
       - systemctl enable --now docker
       - docker compose -f /opt/jenkins-compose.yml up -d
+      - docker compose -f /opt/jenkins-compose.yml exec -T -u root jenkins bash -lc 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io && export JAVA_HOME=/opt/java/openjdk && export PATH=$JAVA_HOME/bin:$PATH && jenkins-plugin-cli --plugins docker-workflow'
+      - |
+        docker_gid=$(stat -c '%g' /var/run/docker.sock)
+        docker compose -f /opt/jenkins-compose.yml exec -T -u root jenkins bash -lc "if getent group docker >/dev/null; then groupmod -g \$docker_gid docker; else groupadd -g \$docker_gid docker; fi; usermod -aG docker jenkins"
+      - docker compose -f /opt/jenkins-compose.yml restart jenkins
       - |
         until docker compose -f /opt/jenkins-compose.yml exec -T jenkins test -f /var/jenkins_home/secrets/initialAdminPassword; do sleep 5; done
         docker compose -f /opt/jenkins-compose.yml exec -T jenkins bash -c 'mkdir -p /var/jenkins_home/plugins && curl -fsSL -o /var/jenkins_home/plugins/monitor-pro.jpi https://updates.jenkins.io/download/plugins/monitor-pro/1.0.9/monitor-pro.hpi && chown 1000:1000 /var/jenkins_home/plugins/monitor-pro.jpi'
