@@ -159,6 +159,7 @@ resource "azurerm_linux_virtual_machine" "jenkins" {
       - systemctl enable --now docker
       - docker compose -f /opt/jenkins-compose.yml up -d
       - docker compose -f /opt/jenkins-compose.yml exec -T -u root jenkins bash -lc 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io && export JAVA_HOME=/opt/java/openjdk && export PATH=$JAVA_HOME/bin:$PATH && jenkins-plugin-cli --plugins docker-workflow'
+      - docker compose -f /opt/jenkins-compose.yml exec -T -u root jenkins bash -lc 'cd /var/jenkins_home/plugins && curl -fsSL -o credentials.jpi https://updates.jenkins.io/latest/credentials.hpi && curl -fsSL -o cloudbees-folder.jpi https://updates.jenkins.io/latest/cloudbees-folder.hpi && chown jenkins:jenkins credentials.jpi cloudbees-folder.jpi'
       - |
         docker_gid=$(stat -c '%g' /var/run/docker.sock)
         docker compose -f /opt/jenkins-compose.yml exec -T -u root jenkins bash -lc "if getent group docker >/dev/null; then groupmod -g \$docker_gid docker; else groupadd -g \$docker_gid docker; fi; usermod -aG docker jenkins"
