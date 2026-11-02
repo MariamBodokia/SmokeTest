@@ -34,6 +34,18 @@ variable "container_target_port" {
   default     = 80
 }
 
+variable "smokemonitor_image" {
+  description = "Fully qualified SmokeMonitor image."
+  type        = string
+  default     = ""
+}
+
+variable "smokemonitor_target_port" {
+  description = "Port exposed by the SmokeMonitor image."
+  type        = number
+  default     = 80
+}
+
 variable "cost_budget_usd" {
   description = "Monthly resource-group budget in USD. This sends alerts; it does not stop resources."
   type        = number

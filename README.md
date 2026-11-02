@@ -9,10 +9,32 @@ This repository is the reproducible proof of concept for the workflow in
 - a Jenkins pipeline with two retries;
 - Terraform for a minimal Azure Container Apps environment and Log Analytics;
 - a GitHub Actions validation pipeline.
+- a SmokeMonitor result API and dashboard.
 
 The Jenkins plugin, triage service, and notifications are the next milestones.
 They should consume the test artifacts produced here rather than hiding the
 evidence inside a custom UI.
+
+SmokeMonitor is implemented as a FastAPI service in
+[smokemonitor/](./smokemonitor). It accepts normalized Jenkins results at
+`POST /api/results`, parses JUnit XML, exposes run details through
+`/api/runs/{run_id}`, and displays a live dashboard at `/`. Azure uses a
+low-cost, durable Azure Table Storage backend; local Docker Compose uses SQLite.
+
+After Azure provisioning, its URL is available with:
+
+```bash
+terraform -chdir=infra/terraform output -raw smokemonitor_url
+```
+
+The Azure deployment workflow builds and publishes both `app/` and
+`smokemonitor/`, updates both Container Apps, and checks the monitor health
+endpoint. Terraform also provisions the monitor's Azure Storage account and
+table, so test history survives Container Apps restarts and scale-to-zero.
+Add a GitHub repository secret named `SMOKEMONITOR_TOKEN` with the same value as
+the Terraform `admin_token` to publish GitHub Actions smoke results. Without
+that secret, deployment still works but the workflow deliberately skips result
+publication.
 
 ## Run locally
 

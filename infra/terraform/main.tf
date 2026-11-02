@@ -79,8 +79,23 @@ resource "azurerm_container_registry" "this" {
   admin_enabled       = true
 }
 
+resource "azurerm_storage_account" "monitor" {
+  name                     = replace("${var.project_name}${random_string.suffix.result}data", "-", "")
+  resource_group_name      = azurerm_resource_group.this.name
+  location                 = azurerm_resource_group.this.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  min_tls_version          = "TLS1_2"
+}
+
+resource "azurerm_storage_table" "monitor" {
+  name                 = "smoketestruns"
+  storage_account_name = azurerm_storage_account.monitor.name
+}
+
 locals {
-  effective_container_image = var.container_image == "" ? "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest" : var.container_image
+  effective_container_image    = var.container_image == "" ? "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest" : var.container_image
+  effective_smokemonitor_image = var.smokemonitor_image == "" ? "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest" : var.smokemonitor_image
 }
 
 resource "azurerm_container_app_environment" "this" {
@@ -108,6 +123,7 @@ resource "azurerm_container_app" "app" {
       percentage      = 100
       latest_revision = true
     }
+
   }
 
   secret {
@@ -140,5 +156,69 @@ resource "azurerm_container_app" "app" {
       }
     }
   }
+}
 
+resource "azurerm_container_app" "smokemonitor" {
+  name                         = "${var.project_name}-monitor"
+  container_app_environment_id = azurerm_container_app_environment.this.id
+  resource_group_name          = azurerm_resource_group.this.name
+  revision_mode                = "Single"
+
+  ingress {
+    external_enabled = true
+    target_port      = var.smokemonitor_target_port
+    transport        = "http"
+    traffic_weight {
+      percentage      = 100
+      latest_revision = true
+    }
+  }
+
+  secret {
+    name  = "monitor-token"
+    value = var.admin_token
+  }
+
+  secret {
+    name  = "registry-password"
+    value = azurerm_container_registry.this.admin_password
+  }
+
+  secret {
+    name  = "storage-connection-string"
+    value = azurerm_storage_account.monitor.primary_connection_string
+  }
+
+  registry {
+    server               = azurerm_container_registry.this.login_server
+    username             = azurerm_container_registry.this.admin_username
+    password_secret_name = "registry-password"
+  }
+
+  template {
+    min_replicas = 0
+    max_replicas = 1
+    container {
+      name   = "smokemonitor"
+      image  = local.effective_smokemonitor_image
+      cpu    = 0.25
+      memory = "0.5Gi"
+      env {
+        name        = "SMOKEMONITOR_TOKEN"
+        secret_name = "monitor-token"
+      }
+      env {
+        name  = "DATABASE_PATH"
+        value = "/tmp/smokemonitor.db"
+      }
+      env {
+        name        = "AZURE_STORAGE_CONNECTION_STRING"
+        secret_name = "storage-connection-string"
+      }
+      env {
+        name  = "AZURE_STORAGE_TABLE"
+        value = azurerm_storage_table.monitor.name
+      }
+    }
+  }
 }

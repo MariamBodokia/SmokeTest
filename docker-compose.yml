@@ -5,3 +5,15 @@ services:
       ADMIN_TOKEN: ${ADMIN_TOKEN:-local-admin-token}
     ports:
       - "8000:8000"
+  smokemonitor:
+    build: ./smokemonitor
+    environment:
+      SMOKEMONITOR_TOKEN: ${SMOKEMONITOR_TOKEN:-local-monitor-token}
+      DATABASE_PATH: /data/smokemonitor.db
+    ports:
+      - "8080:8080"
+    volumes:
+      - smokemonitor-data:/data
+
+volumes:
+  smokemonitor-data:

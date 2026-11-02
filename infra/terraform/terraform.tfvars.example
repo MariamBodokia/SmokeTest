@@ -8,3 +8,5 @@ enable_jenkins = false
 jenkins_resource_group_name = "smokemonitor-jenkins"
 container_target_port = 8000
 container_image = ""
+smokemonitor_image = ""
+smokemonitor_target_port = 80

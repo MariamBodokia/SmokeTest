@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "app/**"
+      - "smokemonitor/**"
       - "smoke-tests/**"
       - ".github/workflows/deploy-azure.yml"
   workflow_dispatch:
@@ -56,12 +57,23 @@ jobs:
           docker push "$image"
           echo "IMAGE=$image" >> "$GITHUB_ENV"
 
+      - name: Build and push SmokeMonitor image
+        run: |
+          image="${{ steps.resources.outputs.registry_server }}/smokemonitor:${GITHUB_SHA}"
+          docker build --tag "$image" smokemonitor
+          docker push "$image"
+          echo "MONITOR_IMAGE=$image" >> "$GITHUB_ENV"
+
       - name: Deploy Container App
         run: |
           az containerapp update \
             --name "$APP_NAME" \
             --resource-group "${{ steps.resources.outputs.resource_group }}" \
             --image "$IMAGE"
+          az containerapp update \
+            --name smokemonitor-monitor \
+            --resource-group "${{ steps.resources.outputs.resource_group }}" \
+            --image "$MONITOR_IMAGE"
 
       - name: Read application URL
         id: app
@@ -73,15 +85,85 @@ jobs:
             --output tsv)
           echo "url=https://$url" >> "$GITHUB_OUTPUT"
 
+      - name: Read SmokeMonitor URL
+        id: monitor
+        run: |
+          url=$(az containerapp show \
+            --name smokemonitor-monitor \
+            --resource-group "${{ steps.resources.outputs.resource_group }}" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+          echo "url=https://$url" >> "$GITHUB_OUTPUT"
+
       - name: Install Playwright test dependencies
         run: |
           python -m pip install -r smoke-tests/requirements.txt
           python -m playwright install --with-deps chromium
 
       - name: Run smoke tests
+        id: smoke
+        continue-on-error: true
         env:
           BASE_URL: ${{ steps.app.outputs.url }}
-        run: pytest smoke-tests --junitxml=artifacts/junit.xml
+        run: |
+          mkdir -p artifacts
+          pytest smoke-tests --junitxml=artifacts/junit.xml
+
+      - name: Publish run to SmokeMonitor
+        if: always() && steps.smoke.outcome != 'skipped' && secrets.SMOKEMONITOR_TOKEN != ''
+        env:
+          MONITOR_URL: ${{ steps.monitor.outputs.url }}
+          MONITOR_TOKEN: ${{ secrets.SMOKEMONITOR_TOKEN }}
+          BASE_URL: ${{ steps.app.outputs.url }}
+          RUN_STATUS: ${{ steps.smoke.outcome == 'success' && 'SUCCESS' || 'FAILURE' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from xml.etree import ElementTree
+
+          xml = open("artifacts/junit.xml", encoding="utf-8").read()
+          root = ElementTree.fromstring(xml)
+          suites = [root] if root.tag == "testsuite" else list(root.findall(".//testsuite"))
+          failed = []
+          for case in root.findall(".//testcase"):
+              failure = case.find("failure")
+              if failure is None:
+                  failure = case.find("error")
+              if failure is not None:
+                  failed.append({
+                      "name": case.attrib.get("name", "unknown"),
+                      "classname": case.attrib.get("classname", ""),
+                      "message": failure.attrib.get("message", failure.text or ""),
+                  })
+          total = sum(int(s.attrib.get("tests", 0)) for s in suites)
+          skipped = sum(int(s.attrib.get("skipped", 0)) for s in suites)
+          payload = {
+              "job": os.environ.get("GITHUB_WORKFLOW", "github-actions-smoke"),
+              "build": os.environ.get("GITHUB_RUN_NUMBER", os.environ["GITHUB_SHA"][:8]),
+              "status": os.environ["RUN_STATUS"],
+              "attempt": 1,
+              "base_url": os.environ["BASE_URL"],
+              "build_url": f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              "total": total,
+              "failed": len(failed),
+              "skipped": skipped,
+              "passed": max(0, total - len(failed) - skipped),
+              "failed_tests": failed,
+          }
+          request = urllib.request.Request(
+              os.environ["MONITOR_URL"] + "/api/results",
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json", "X-SmokeMonitor-Token": os.environ["MONITOR_TOKEN"]},
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=20) as response:
+              print(response.read().decode())
+          PY
+
+      - name: Check SmokeMonitor
+        run: curl --fail --silent "${{ steps.monitor.outputs.url }}/health"
 
       - name: Publish test results
         if: always()
