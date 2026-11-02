@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'mcr.microsoft.com/playwright/python:v1.49.1-noble'
+            image 'mcr.microsoft.com/playwright/python:v1.64.1-noble'
             args '-u root'
         }
     }
@@ -26,7 +26,7 @@ pipeline {
                     junit allowEmptyResults: true, testResults: 'artifacts/junit.xml'
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'artifacts/**,test-results/**'
                     withEnv(["SMOKEMONITOR_STATUS=${currentBuild.currentResult}"]) {
-                        sh '''
+                        sh(script: '''
                       python - <<'PY'
                       import json, os, urllib.request
                       payload = {
@@ -47,7 +47,7 @@ pipeline {
                       except Exception as error:
                           print("SmokeMonitor publication failed:", error)
                       PY
-                        '''
+                        '''.stripIndent())
                     }
                 }
             }
