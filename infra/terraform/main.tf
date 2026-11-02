@@ -145,7 +145,7 @@ resource "azurerm_linux_virtual_machine" "jenkins" {
         cat > /opt/jenkins-compose.yml <<'EOF'
         services:
           jenkins:
-            image: jenkins/jenkins:2.440.3-lts-jdk17
+            image: jenkins/jenkins:lts-jdk21
             restart: unless-stopped
             ports:
               - "8080:8080"
