@@ -110,7 +110,19 @@ jobs:
           pytest smoke-tests --junitxml=artifacts/junit.xml
 
       - name: Publish run to SmokeMonitor
-        if: always() && steps.smoke.outcome != 'skipped' && secrets.SMOKEMONITOR_TOKEN != ''
+        id: monitor_token
+        if: always()
+        env:
+          MONITOR_TOKEN: ${{ secrets.SMOKEMONITOR_TOKEN }}
+        run: |
+          if [ -n "$MONITOR_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send run to SmokeMonitor
+        if: always() && steps.smoke.outcome != 'skipped' && steps.monitor_token.outputs.configured == 'true'
         env:
           MONITOR_URL: ${{ steps.monitor.outputs.url }}
           MONITOR_TOKEN: ${{ secrets.SMOKEMONITOR_TOKEN }}
