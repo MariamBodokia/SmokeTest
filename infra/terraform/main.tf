@@ -153,7 +153,7 @@ resource "azurerm_linux_virtual_machine" "jenkins" {
             volumes:
               - /opt/jenkins_home:/var/jenkins_home
             environment:
-              JAVA_OPTS: "-Djenkins.install.runSetupWizard=true"
+              JAVA_OPTS: "-Djenkins.install.runSetupWizard=true -Dhudson.security.csrf.GlobalCrumbIssuerConfiguration.DISABLE_CSRF_PROTECTION=true"
         EOF
       - systemctl enable --now docker
       - docker compose -f /opt/jenkins-compose.yml up -d
