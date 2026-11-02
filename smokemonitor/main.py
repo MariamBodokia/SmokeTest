@@ -118,9 +118,8 @@ def table_client():
     if not storage_connection_string or TableServiceClient is None:
         return None
     service = TableServiceClient.from_connection_string(storage_connection_string)
-    table = service.get_table_client(storage_table_name)
-    table.create_table_if_not_exists()
-    return table
+    service.create_table_if_not_exists(storage_table_name)
+    return service.get_table_client(storage_table_name)
 
 
 def entity_from_result(result: TestResult, run_id: str) -> dict[str, Any]:
