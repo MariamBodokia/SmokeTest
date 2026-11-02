@@ -1,0 +1,92 @@
+name: Build, deploy, and smoke test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "smoke-tests/**"
+      - ".github/workflows/deploy-azure.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  APP_NAME: smokemonitor-app
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Discover Terraform-managed resources
+        id: resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          resource_group=$(az group list \
+            --tag project=smokemonitor \
+            --query "[?tags.environment=='poc'].name | [0]" \
+            --output tsv)
+          registry=$(az acr list \
+            --resource-group "$resource_group" \
+            --query "[0].{name:name,loginServer:loginServer}" \
+            --output json)
+          echo "resource_group=$resource_group" >> "$GITHUB_OUTPUT"
+          echo "registry_name=$(jq -r .name <<< "$registry")" >> "$GITHUB_OUTPUT"
+          echo "registry_server=$(jq -r .loginServer <<< "$registry")" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Azure Container Registry
+        run: az acr login --name "${{ steps.resources.outputs.registry_name }}"
+
+      - name: Build and push application image
+        run: |
+          image="${{ steps.resources.outputs.registry_server }}/smokemonitor-demo:${GITHUB_SHA}"
+          docker build --tag "$image" app
+          docker push "$image"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Deploy Container App
+        run: |
+          az containerapp update \
+            --name "$APP_NAME" \
+            --resource-group "${{ steps.resources.outputs.resource_group }}" \
+            --image "$IMAGE"
+
+      - name: Read application URL
+        id: app
+        run: |
+          url=$(az containerapp show \
+            --name "$APP_NAME" \
+            --resource-group "${{ steps.resources.outputs.resource_group }}" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)
+          echo "url=https://$url" >> "$GITHUB_OUTPUT"
+
+      - name: Install Playwright test dependencies
+        run: |
+          python -m pip install -r smoke-tests/requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        env:
+          BASE_URL: ${{ steps.app.outputs.url }}
+        run: pytest smoke-tests --junitxml=artifacts/junit.xml
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-results
+          path: artifacts/
+          if-no-files-found: ignore

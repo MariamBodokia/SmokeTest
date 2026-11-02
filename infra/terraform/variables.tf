@@ -25,7 +25,7 @@ variable "admin_token" {
 variable "container_image" {
   description = "Fully qualified demo application image."
   type        = string
-  default     = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
+  default     = ""
 }
 
 variable "container_target_port" {

@@ -6,4 +6,5 @@ cost_budget_usd = 150
 cost_alert_email = "your-email@example.com"
 enable_jenkins = false
 jenkins_resource_group_name = "smokemonitor-jenkins"
-container_target_port = 80
+container_target_port = 8000
+container_image = ""

@@ -71,6 +71,18 @@ resource "azurerm_log_analytics_workspace" "this" {
   retention_in_days   = 30
 }
 
+resource "azurerm_container_registry" "this" {
+  name                = replace("${var.project_name}${random_string.suffix.result}", "-", "")
+  resource_group_name = azurerm_resource_group.this.name
+  location            = azurerm_resource_group.this.location
+  sku                 = "Basic"
+  admin_enabled       = true
+}
+
+locals {
+  effective_container_image = var.container_image == "" ? "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest" : var.container_image
+}
+
 resource "azurerm_container_app_environment" "this" {
   name                       = "${var.project_name}-env"
   location                   = azurerm_resource_group.this.location
@@ -103,12 +115,23 @@ resource "azurerm_container_app" "app" {
     value = var.admin_token
   }
 
+  secret {
+    name  = "registry-password"
+    value = azurerm_container_registry.this.admin_password
+  }
+
+  registry {
+    server               = azurerm_container_registry.this.login_server
+    username             = azurerm_container_registry.this.admin_username
+    password_secret_name = "registry-password"
+  }
+
   template {
     min_replicas = 0
     max_replicas = 1
     container {
       name   = "app"
-      image  = var.container_image
+      image  = local.effective_container_image
       cpu    = 0.25
       memory = "0.5Gi"
       env {

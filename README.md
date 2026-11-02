@@ -90,16 +90,33 @@ subscription automatically and it does not contain your secrets.
    terraform output
    ```
 
-The initial image is a public placeholder so the infrastructure can be learned
-and verified without paying for a container registry. For the next deployment
-step, publish the application image to GitHub Container Registry or another
-registry, set `container_image`, and configure registry credentials only when
-the image is private. Azure Container Registry is deliberately not created in
-this minimum-cost phase.
+The app image is stored in Azure Container Registry (Basic SKU). This adds a
+small predictable registry charge, but avoids GHCR visibility and anonymous-pull
+problems. Terraform configures the Container App to authenticate to this
+registry using its generated admin credentials; those credentials are stored in
+Terraform state, which must remain private.
 
-The public placeholder listens on port `80`, so the initial variables use
-`container_target_port = 80`. When we deploy the repository's FastAPI image,
-change this to `8000`, which is the port exposed by `app/Dockerfile`.
+The initial `container_image = ""` setting means Terraform uses the public
+placeholder image. After the first apply creates the registry, build and push
+the real image:
+
+```bash
+REGISTRY=$(terraform output -raw registry_login_server)
+REGISTRY_NAME=$(terraform output -raw registry_name)
+az acr login --name "$REGISTRY_NAME"
+docker build -t "$REGISTRY/smokemonitor-demo:latest" ../../app
+docker push "$REGISTRY/smokemonitor-demo:latest"
+```
+
+Then set this in `terraform.tfvars`:
+
+```hcl
+container_image       = "YOUR_REGISTRY_LOGIN_SERVER/smokemonitor-demo:latest"
+container_target_port = 8000
+```
+
+Run `terraform apply` again. The Container App will then pull the private image
+from ACR using the registry credentials Terraform configured.
 
 ## Deploy the real application image
 
@@ -191,8 +208,9 @@ for this POC unless a service is unavailable there.
 ## CI/CD responsibilities
 
 - GitHub Actions validates code and Terraform on pull requests.
-- A later protected GitHub Actions workflow will build and publish the image
-  and apply Terraform after approval.
+- [deploy-azure.yml](./.github/workflows/deploy-azure.yml) builds the app image,
+  pushes it to the Terraform-created ACR, updates Container Apps, and runs the
+  smoke tests against the deployed URL.
 - Jenkins runs browser smoke tests against the deployed URL, retries a failed
   test up to two additional times, and archives JUnit and Playwright evidence.
 
@@ -200,3 +218,27 @@ This split is intentional: GitHub Actions provisions infrastructure and Jenkins
 performs continuous smoke validation. Do not store Azure passwords,
 service-principal keys, or admin tokens in this repository. Use GitHub OIDC,
 managed identity, or a secret manager when deployment automation is added.
+
+## One-time GitHub Actions Azure setup
+
+The deployment workflow uses GitHub OIDC, so no Azure password is stored in
+GitHub. An Azure administrator must create an Entra application/service
+principal with a federated credential for this repository and grant it:
+
+- `AcrPush` on the ACR;
+- `Contributor` on the application resource group, so it can update the
+  Container App.
+
+Add these repository secrets under **Settings → Secrets and variables →
+Actions**:
+
+```text
+AZURE_CLIENT_ID
+AZURE_TENANT_ID
+AZURE_SUBSCRIPTION_ID
+```
+
+After those three secrets exist, pushing a change to `main` automatically builds
+the app, deploys it, and runs the smoke suite. Terraform remains responsible
+for creating and changing the Azure infrastructure; the workflow is responsible
+for routine application releases.
