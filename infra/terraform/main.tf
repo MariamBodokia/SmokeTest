@@ -18,13 +18,151 @@ resource "azurerm_resource_group" "this" {
 resource "azurerm_resource_group" "jenkins" {
   count    = var.enable_jenkins ? 1 : 0
   name     = var.jenkins_resource_group_name
-  location = var.location
+  location = var.jenkins_location
   tags = {
     project     = var.project_name
     environment = "poc"
     managed_by  = "terraform"
     component   = "jenkins"
   }
+}
+
+resource "azurerm_public_ip" "jenkins" {
+  count               = var.enable_jenkins ? 1 : 0
+  name                = "smokemonitor-jenkins-ip"
+  location            = azurerm_resource_group.jenkins[0].location
+  resource_group_name = azurerm_resource_group.jenkins[0].name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+resource "azurerm_network_security_group" "jenkins" {
+  count               = var.enable_jenkins ? 1 : 0
+  name                = "smokemonitor-jenkins-nsg"
+  location            = azurerm_resource_group.jenkins[0].location
+  resource_group_name = azurerm_resource_group.jenkins[0].name
+
+  security_rule {
+    name                       = "jenkins-http-from-admin"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "8080"
+    source_address_prefix      = var.jenkins_allowed_cidr
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "ssh-from-admin"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = var.jenkins_allowed_cidr
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_network_interface" "jenkins" {
+  count               = var.enable_jenkins ? 1 : 0
+  name                = "smokemonitor-jenkins-nic"
+  location            = azurerm_resource_group.jenkins[0].location
+  resource_group_name = azurerm_resource_group.jenkins[0].name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.jenkins[0].id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.jenkins[0].id
+  }
+}
+
+resource "azurerm_network_interface_security_group_association" "jenkins" {
+  count                     = var.enable_jenkins ? 1 : 0
+  network_interface_id      = azurerm_network_interface.jenkins[0].id
+  network_security_group_id = azurerm_network_security_group.jenkins[0].id
+}
+
+resource "azurerm_virtual_network" "jenkins" {
+  count               = var.enable_jenkins ? 1 : 0
+  name                = "smokemonitor-jenkins-vnet"
+  location            = azurerm_resource_group.jenkins[0].location
+  resource_group_name = azurerm_resource_group.jenkins[0].name
+  address_space       = ["10.40.0.0/16"]
+}
+
+resource "azurerm_subnet" "jenkins" {
+  count                = var.enable_jenkins ? 1 : 0
+  name                 = "default"
+  resource_group_name  = azurerm_resource_group.jenkins[0].name
+  virtual_network_name = azurerm_virtual_network.jenkins[0].name
+  address_prefixes     = ["10.40.1.0/24"]
+}
+
+resource "azurerm_linux_virtual_machine" "jenkins" {
+  count                           = var.enable_jenkins ? 1 : 0
+  name                            = "smokemonitor-jenkins"
+  resource_group_name             = azurerm_resource_group.jenkins[0].name
+  location                        = azurerm_resource_group.jenkins[0].location
+  size                            = "Standard_D2ads_v5"
+  admin_username                  = var.jenkins_admin_username
+  disable_password_authentication = true
+  network_interface_ids           = [azurerm_network_interface.jenkins[0].id]
+
+  admin_ssh_key {
+    username   = var.jenkins_admin_username
+    public_key = var.jenkins_ssh_public_key
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+    disk_size_gb         = 30
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  custom_data = base64encode(<<-CLOUDINIT
+    #cloud-config
+    package_update: true
+    packages:
+      - docker.io
+      - docker-compose-v2
+    runcmd:
+      - usermod -aG docker ${var.jenkins_admin_username}
+      - mkdir -p /opt/jenkins_home
+      - chown -R 1000:1000 /opt/jenkins_home
+      - |
+        cat > /opt/jenkins-compose.yml <<'EOF'
+        services:
+          jenkins:
+            image: jenkins/jenkins:2.440.3-lts-jdk17
+            restart: unless-stopped
+            ports:
+              - "8080:8080"
+              - "50000:50000"
+            volumes:
+              - /opt/jenkins_home:/var/jenkins_home
+            environment:
+              JAVA_OPTS: "-Djenkins.install.runSetupWizard=true"
+        EOF
+      - systemctl enable --now docker
+      - docker compose -f /opt/jenkins-compose.yml up -d
+      - |
+        until docker compose -f /opt/jenkins-compose.yml exec -T jenkins test -f /var/jenkins_home/secrets/initialAdminPassword; do sleep 5; done
+        docker compose -f /opt/jenkins-compose.yml exec -T jenkins bash -c 'mkdir -p /var/jenkins_home/plugins && curl -fsSL -o /var/jenkins_home/plugins/monitor-pro.jpi https://updates.jenkins.io/download/plugins/monitor-pro/1.0.9/monitor-pro.hpi && chown 1000:1000 /var/jenkins_home/plugins/monitor-pro.jpi'
+        docker compose -f /opt/jenkins-compose.yml restart jenkins
+  CLOUDINIT
+  )
 }
 
 resource "azurerm_consumption_budget_resource_group" "this" {

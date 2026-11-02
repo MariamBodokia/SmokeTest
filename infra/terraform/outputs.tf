@@ -21,3 +21,11 @@ output "smokemonitor_url" {
 output "jenkins_resource_group_name" {
   value = var.enable_jenkins ? azurerm_resource_group.jenkins[0].name : null
 }
+
+output "jenkins_public_ip" {
+  value = var.enable_jenkins ? azurerm_public_ip.jenkins[0].ip_address : null
+}
+
+output "jenkins_url" {
+  value = var.enable_jenkins ? "http://${azurerm_public_ip.jenkins[0].ip_address}:8080" : null
+}

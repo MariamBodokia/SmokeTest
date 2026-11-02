@@ -81,3 +81,28 @@ variable "jenkins_resource_group_name" {
   type        = string
   default     = "smokemonitor-jenkins"
 }
+
+variable "jenkins_location" {
+  description = "Azure region for the separate Jenkins resource group."
+  type        = string
+  default     = "swedencentral"
+}
+
+variable "jenkins_ssh_public_key" {
+  description = "SSH public key for the Jenkins VM administrator."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "jenkins_allowed_cidr" {
+  description = "CIDR allowed to access Jenkins HTTP and SSH."
+  type        = string
+  default     = ""
+}
+
+variable "jenkins_admin_username" {
+  description = "Linux administrator username for the Jenkins VM."
+  type        = string
+  default     = "azureuser"
+}

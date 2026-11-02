@@ -6,14 +6,14 @@ This repository is the reproducible proof of concept for the workflow in
 - a deliberately fault-injectable FastAPI commerce application;
 - ten Playwright smoke tests covering health, catalog, product details,
   checkout, orders, admin access, and failure handling;
-- a Jenkins pipeline with two retries;
+- a real Jenkins LTS VM with the official Jenkins Monitor Pro plugin;
 - Terraform for a minimal Azure Container Apps environment and Log Analytics;
 - a GitHub Actions validation pipeline.
-- a SmokeMonitor result API and dashboard.
+- an optional SmokeMonitor result API for machine-readable evidence.
 
-The Jenkins plugin, triage service, and notifications are the next milestones.
-They should consume the test artifacts produced here rather than hiding the
-evidence inside a custom UI.
+The screenshot's product is **Monitor Pro for Jenkins**. It is installed in
+Jenkins itself and reads Jenkins views/jobs through the Jenkins REST API; the
+FastAPI service below is not a replacement for that plugin.
 
 SmokeMonitor is implemented as a FastAPI service in
 [smokemonitor/](./smokemonitor). It accepts normalized Jenkins results at
@@ -195,6 +195,29 @@ still need cost monitoring. The Terraform budget is set to
 $150/month to leave approximately $50 of the $200 learning budget as safety
 margin. Azure budgets send alerts; they do not stop consumption automatically.
 
+## Real Jenkins and Monitor Pro
+
+Terraform creates Jenkins in the separate `smokemonitor-jenkins` resource
+group, in Sweden Central, while the demo application remains in North Europe.
+The VM uses a regionally available `Standard_D2ads_v5` size because this
+subscription has no B-series capacity in the original region. Ports 22 and
+8080 are restricted to `jenkins_allowed_cidr`.
+
+Get the Jenkins URL and initial setup password:
+
+```bash
+terraform -chdir=infra/terraform output -raw jenkins_url
+ssh -i ~/.ssh/smokemonitor_jenkins azureuser@$(terraform -chdir=infra/terraform output -raw jenkins_public_ip) \
+  'sudo cat /opt/jenkins_home/secrets/initialAdminPassword'
+```
+
+Open the URL, paste the password, complete the Jenkins setup wizard, and
+create a Pipeline job pointing at this repository's `Jenkinsfile`. The
+`monitor-pro:1.0.9` plugin is installed in Jenkins during VM bootstrap. After
+Jenkins restarts, the **Monitor Pro** entry appears in the Jenkins left menu.
+The plugin is an old 2018 release, so its compatibility is intentionally
+validated on this real Jenkins instance rather than hidden behind a custom UI.
+
 ## Minimum-cost architecture
 
 The first Azure deployment intentionally creates only:
@@ -212,10 +235,16 @@ be added only when the application must reach private services, restrict
 ingress, or meet a specific network/data-residency requirement. At that point,
 we can add it as a deliberate architecture change and re-check pricing.
 
-Jenkins will be deployed into a separate resource group from the application.
-Set `enable_jenkins = true` only when we add the Jenkins VM and its networking.
-This keeps Jenkins infrastructure, cost reporting, access policies, and
-deletion independent from the application environment.
+Jenkins and the real Monitor Pro plugin run in a separate
+`smokemonitor-jenkins` resource group in Sweden Central, while the application
+remains in North Europe. This deliberately demonstrates a cross-region setup.
+The VM is a low-cost Standard_B1s with
+a persistent OS disk. Terraform restricts ports 22 and 8080 to
+`jenkins_allowed_cidr`; do not use `0.0.0.0/0` except for a short diagnostic.
+The plugin is the official `monitor-pro:1.0.9` release shown in the original
+diagram. It is an old plugin (released in 2018), so it is installed explicitly
+and should be validated during the Jenkins first-run setup rather than
+represented by a custom replacement dashboard.
 
 ## Region choice
 
