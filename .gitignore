@@ -117,7 +117,15 @@ ipython_config.py
 # pdm.toml
 .pdm-python
 .pdm-build/
-
+.venv/
+.env
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+playwright-report/
+test-results/
+artifacts/
 # pixi
 #   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
 # pixi.lock

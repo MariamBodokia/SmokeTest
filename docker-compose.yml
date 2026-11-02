@@ -1,0 +1,7 @@
+services:
+  app:
+    build: ./app
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-local-admin-token}
+    ports:
+      - "8000:8000"
